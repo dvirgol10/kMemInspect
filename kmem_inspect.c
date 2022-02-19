@@ -4,9 +4,9 @@
 #include <linux/err.h>
 #include <linux/types.h>
 #include <linux/fs.h>
-#include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 
 
 MODULE_LICENSE("GPL");
@@ -20,13 +20,16 @@ static ssize_t device_write(struct file *filp, const char __user *buffer, size_t
 
 
 #define DEVICE_NAME "kmem_inspect"
-#define BYTES_TO_READ 2
 
 static int major_num;
 static dev_t device_num;
 static struct class *cls;
 static struct device *dev;
 static u8 *addr;
+static int msg_len;
+
+static int content_len = 1;
+module_param(content_len, int, 0);
 
 static struct file_operations kmem_inspect_fops = {
 	.read = device_read,
@@ -52,25 +55,25 @@ static ssize_t device_read(struct file *flip, char __user *buffer, size_t length
 	int bytes_read = 0;
 	char current_byte;
 
-	if (*offset >= BYTES_TO_READ) {
+	if (*offset >= msg_len) {
 		*offset = 0;
 		return 0; //EOF
 	}
 
-	char *content = kmalloc(BYTES_TO_READ + 1, GFP_KERNEL);
-	sprintf(&current_byte, "%x", *addr);
-	content[0] = current_byte;
-	content[1] = '\n';
 
-	while (length && (*offset < BYTES_TO_READ)) {
-		put_user(*(content + *offset) , buffer);
+	while (length && (*offset < msg_len)) {
+		if (*offset < msg_len - 1) {
+			sprintf(&current_byte, "%x", *(addr + *offset));
+		} else {
+			current_byte = '\n';
+		}
+		put_user(current_byte , buffer);
 		buffer += 1;
 		bytes_read += 1;
 		length -= 1;
 		*offset += 1;
 	}
 
-	kfree(content);
 	return bytes_read;
 }
 
@@ -102,16 +105,19 @@ int __init init_module(void) {
 	device_num = MKDEV(major_num, 0);
 
 	cls = class_create(THIS_MODULE, DEVICE_NAME);
-	if (IS_ERR(cls) < 0) {
+	if (IS_ERR(cls)) {
 		pr_alert("Fail in creating the class structure. Error: %ld\n", PTR_ERR(cls));
 		return PTR_ERR(cls);
 	}
 
 	dev = device_create(cls, NULL, device_num, NULL, DEVICE_NAME);
-	if (IS_ERR(dev) < 0) {
+	if (IS_ERR(dev)) {
 		pr_alert("Fail in creating the device. Error: %ld\n", PTR_ERR(dev));
 		return PTR_ERR(dev);
 	}
+
+	pr_info("content_len is %d\n", content_len);
+	msg_len = content_len + 1; //"+1" for the '\n' character
 
 	return 0;
 }
