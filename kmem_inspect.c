@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/slab.h>
 
 
 MODULE_LICENSE("GPL");
@@ -27,6 +28,7 @@ static struct class *cls;
 static struct device *dev;
 static u8 *addr;
 static int msg_len;
+static char *msg;
 
 static int content_len = 1;
 module_param(content_len, int, 0);
@@ -53,30 +55,18 @@ static int device_release(struct inode *inode, struct file *file) {
 
 static ssize_t device_read(struct file *flip, char __user *buffer, size_t length, loff_t *offset) {
 	int bytes_read = 0;
-	char current_byte[5] = {0, 0, 0, 0, 0};
 
 	if (*offset >= msg_len) {
 		*offset = 0;
 		return 0; //EOF
 	}
 
-	int is_lower_nibble = 0;
 	while (length && (*offset < msg_len)) {
-		if (*offset < msg_len - 1){
-			if (!is_lower_nibble) {
-				sprintf(current_byte, "%x", *(addr + (*offset / 2)));
-			}
-		} else {
-			current_byte[0] = '\n';
-			current_byte[1] = '\n';
-
-		}
-		put_user(current_byte[is_lower_nibble] , buffer);
+		put_user(*(msg + *offset) , buffer);
 		buffer += 1;
 		bytes_read += 1;
 		length -= 1;
 		*offset += 1;
-		is_lower_nibble = 1 - is_lower_nibble;
 	}
 
 	return bytes_read;
@@ -96,6 +86,15 @@ static ssize_t device_write(struct file *filp, const char __user *buffer, size_t
 		pr_info("The current requested address is 0x%llx\n", res_addr);
 		addr = (u8*) res_addr;
 		bytes_written = length;
+		char current_byte[3] = {0, 0, 0};
+		int i = 0;
+		while (i < content_len) { //write the content of the address to the message
+			sprintf(current_byte, "%hhX", *(addr + i));
+			msg[i * 5 + 2] = current_byte[0];
+			msg[i * 5 + 3] = current_byte[1];
+			i += 1;
+		}
+
 	}
 	return bytes_written;
 }
@@ -122,13 +121,23 @@ int __init init_module(void) {
 	}
 
 	pr_info("content_len is %d\n", content_len);
-	msg_len = content_len * 2 + 1; //"*2" because every byte is 2 ascii characters, +1" for the '\n' character
-	
+	msg_len = content_len * 5; //the format of the message is "0xAA 0xBB ... 0xCC", so 5 chars per byte, and for the last byte there is a '\n' instead of space
+	msg = kmalloc(msg_len, GFP_KERNEL);
+	int i = 0;
+	while (i < content_len) { //setup the message
+		msg[i * 5] = '0';
+		msg[i * 5 + 1] = 'x';
+		msg[i * 5 + 4] = ' ';
+		i += 1;
+	}
+	msg[msg_len - 1] = '\n';
+
 	return 0;
 }
 
 
 void __exit cleanup_module(void) {
+	kfree(msg);
 	device_destroy(cls, device_num);
 	class_destroy(cls);
 	unregister_chrdev(major_num, DEVICE_NAME);
