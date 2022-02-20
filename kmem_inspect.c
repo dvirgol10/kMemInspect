@@ -53,25 +53,30 @@ static int device_release(struct inode *inode, struct file *file) {
 
 static ssize_t device_read(struct file *flip, char __user *buffer, size_t length, loff_t *offset) {
 	int bytes_read = 0;
-	char current_byte;
+	char current_byte[5] = {0, 0, 0, 0, 0};
 
 	if (*offset >= msg_len) {
 		*offset = 0;
 		return 0; //EOF
 	}
 
-
+	int is_lower_nibble = 0;
 	while (length && (*offset < msg_len)) {
-		if (*offset < msg_len - 1) {
-			sprintf(&current_byte, "%x", *(addr + *offset));
+		if (*offset < msg_len - 1){
+			if (!is_lower_nibble) {
+				sprintf(current_byte, "%x", *(addr + (*offset / 2)));
+			}
 		} else {
-			current_byte = '\n';
+			current_byte[0] = '\n';
+			current_byte[1] = '\n';
+
 		}
-		put_user(current_byte , buffer);
+		put_user(current_byte[is_lower_nibble] , buffer);
 		buffer += 1;
 		bytes_read += 1;
 		length -= 1;
 		*offset += 1;
+		is_lower_nibble = 1 - is_lower_nibble;
 	}
 
 	return bytes_read;
@@ -117,8 +122,8 @@ int __init init_module(void) {
 	}
 
 	pr_info("content_len is %d\n", content_len);
-	msg_len = content_len + 1; //"+1" for the '\n' character
-
+	msg_len = content_len * 2 + 1; //"*2" because every byte is 2 ascii characters, +1" for the '\n' character
+	
 	return 0;
 }
 
